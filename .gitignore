@@ -35,3 +35,4 @@ data/processed/*
 # Keep generated outputs reproducible via scripts.
 outputs/*.xlsx
 outputs/*.csv
+outputs/*.png
