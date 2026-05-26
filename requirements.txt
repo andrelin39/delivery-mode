@@ -5,3 +5,4 @@ xlsxwriter
 matplotlib
 seaborn
 pathlib
+statsmodels

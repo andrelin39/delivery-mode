@@ -9,6 +9,7 @@ dependencies:
   - xlsxwriter
   - matplotlib
   - seaborn
+  - statsmodels
   - pip
   - pip:
       - pathlib
