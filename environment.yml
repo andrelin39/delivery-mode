@@ -1,0 +1,14 @@
+name: delivery-mode
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - pandas
+  - numpy
+  - openpyxl
+  - xlsxwriter
+  - matplotlib
+  - seaborn
+  - pip
+  - pip:
+      - pathlib
