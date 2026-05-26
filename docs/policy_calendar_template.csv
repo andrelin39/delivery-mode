@@ -1,0 +1,6 @@
+period_name,start_date,end_date,policy_description,admission_policy,testing_policy,companion_policy,induction_admission_relevance,source_document,notes
+pre_policy_period,NA,NA,NA,NA,NA,NA,NA,NA,Placeholder only. Replace NA dates with confirmed external hospital policy dates.
+early_covid_policy_period,NA,NA,NA,NA,NA,NA,NA,NA,Placeholder only. Replace NA dates with confirmed external hospital policy dates.
+strict_infection_control_period,NA,NA,NA,NA,NA,NA,NA,NA,Placeholder only. Replace NA dates with confirmed external hospital policy dates.
+coexistence_or_transition_period,NA,NA,NA,NA,NA,NA,NA,NA,Placeholder only. Replace NA dates with confirmed external hospital policy dates.
+post_policy_period,NA,NA,NA,NA,NA,NA,NA,NA,Placeholder only. Replace NA dates with confirmed external hospital policy dates.
