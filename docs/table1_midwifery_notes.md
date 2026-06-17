@@ -39,3 +39,30 @@ The Midwifery manuscript table uses the following admission pathway terminology:
 - Planned induction admission
 
 These labels are used in place of the analysis-variable coding labels to improve readability and align the table with manuscript language.
+
+## Bug Fix — 2026-06-17
+
+### Root Cause
+
+The original script used `LABOR_ONSET_GROUP_FINAL` for group assignment. This column applies a strict classification rule that reclassifies 16 ambiguous records (`FLAG_LABOR_ONSET_REQUIRES_REVIEW == 1`) from `spontaneous_labor` to `non_spontaneous_or_induction`. In a prior version of the dataset, `LABOR_ONSET_GROUP_FINAL` was `NaN` for these 16 records, causing the `isin(GROUP_ORDER)` filter in `make_table_dataset` to exclude them from the analytic cohort. The result was that the categorical variables (Marriage status, Education level) summed to 1348 rather than 1364.
+
+### Fix
+
+Group assignment now uses `LABOR_ONSET_GROUP` (the base/main-analysis classification) instead of `LABOR_ONSET_GROUP_FINAL` (the strict/sensitivity-analysis classification). All 16 flagged records are correctly classified as `spontaneous_labor` under the base rule and are retained in the cohort.
+
+This aligns Table 1 with the pre-specified final analytic cohort:
+
+| Group | N |
+|---|---|
+| Symptomatic admission | 697 |
+| Planned induction admission | 667 |
+| **Total** | **1364** |
+
+### Validation Step Added
+
+A `validate_cohort()` function was added to `scripts/13_midwifery_table1_refactor.py`. It raises `ValueError` if:
+
+1. `FLAG_LABOR_ONSET_REQUIRES_REVIEW == 1` records are absent from the cohort (indicating an unintentional sensitivity exclusion).
+2. The sum of group-level non-missing counts for any categorical variable does not equal the total non-missing count (indicating implicit record exclusion).
+
+The validation is printed to stdout on every run with per-variable OK/FAIL status.

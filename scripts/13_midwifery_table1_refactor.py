@@ -59,25 +59,51 @@ def read_v03() -> pd.DataFrame:
 
 
 def make_table_dataset(df: pd.DataFrame) -> pd.DataFrame:
-    required = {"LABOR_ONSET_GROUP_FINAL", "COVID_POLICY_PERIOD_FINAL"}
+    required = {"LABOR_ONSET_GROUP", "COVID_POLICY_PERIOD_FINAL"}
     missing = required.difference(df.columns)
     if missing:
         raise KeyError(f"Required columns not found: {sorted(missing)}")
 
     strict = df[df["COVID_POLICY_PERIOD_FINAL"].astype("string").eq("strict_covid_policy_period")].copy()
-    strict = strict[strict["LABOR_ONSET_GROUP_FINAL"].astype("string").isin(GROUP_ORDER)].copy()
+    strict = strict[strict["LABOR_ONSET_GROUP"].astype("string").isin(GROUP_ORDER)].copy()
 
     for _, _, col in CONTINUOUS_VARIABLES:
         strict[col] = pd.to_numeric(strict[col], errors="coerce")
     for _, _, col in CATEGORICAL_VARIABLES:
         strict[col] = strict[col].astype("string")
 
-    strict["LABOR_ONSET_GROUP_FINAL"] = pd.Categorical(
-        strict["LABOR_ONSET_GROUP_FINAL"],
+    strict["LABOR_ONSET_GROUP"] = pd.Categorical(
+        strict["LABOR_ONSET_GROUP"],
         categories=GROUP_ORDER,
         ordered=True,
     )
     return strict
+
+
+def validate_cohort(df: pd.DataFrame) -> None:
+    """Abort if hidden exclusions or category-count mismatches are detected."""
+    n = len(df)
+
+    if "FLAG_LABOR_ONSET_REQUIRES_REVIEW" in df.columns:
+        n_flagged = int(df["FLAG_LABOR_ONSET_REQUIRES_REVIEW"].eq(1).sum())
+        if n_flagged == 0:
+            raise ValueError(
+                "No FLAG_LABOR_ONSET_REQUIRES_REVIEW==1 records in cohort — "
+                "a sensitivity-analysis exclusion may have been applied unintentionally."
+            )
+
+    for _, label, col in CATEGORICAL_VARIABLES:
+        n_notna = int(df[col].notna().sum())
+        group_sum = sum(
+            int(df.loc[df["LABOR_ONSET_GROUP"].astype("string").eq(g), col].notna().sum())
+            for g in GROUP_ORDER
+        )
+        if group_sum != n_notna:
+            raise ValueError(
+                f"Categorical mismatch for '{label}': "
+                f"group-level non-missing sum={group_sum}, total non-missing={n_notna}. "
+                f"Implicit exclusion detected — check cohort source."
+            )
 
 
 def fmt_p(value: float) -> str:
@@ -104,7 +130,7 @@ def fmt_cat(count: int, denominator: int) -> str:
 def continuous_p_value(df: pd.DataFrame, col: str) -> float:
     groups = [
         pd.to_numeric(
-            df.loc[df["LABOR_ONSET_GROUP_FINAL"].astype("string").eq(group), col],
+            df.loc[df["LABOR_ONSET_GROUP"].astype("string").eq(group), col],
             errors="coerce",
         ).dropna()
         for group in GROUP_ORDER
@@ -118,7 +144,7 @@ def categorical_p_value(df: pd.DataFrame, col: str) -> float:
     valid = df[df[col].notna()].copy()
     if valid.empty:
         return np.nan
-    table = pd.crosstab(valid[col], valid["LABOR_ONSET_GROUP_FINAL"]).reindex(columns=GROUP_ORDER, fill_value=0)
+    table = pd.crosstab(valid[col], valid["LABOR_ONSET_GROUP"]).reindex(columns=GROUP_ORDER, fill_value=0)
     if table.shape[0] < 2 or table.shape[1] < 2:
         return np.nan
     return float(stats.chi2_contingency(table, correction=False).pvalue)
@@ -144,7 +170,7 @@ def build_table1(df: pd.DataFrame) -> pd.DataFrame:
     current_section = ""
 
     group_frames = {
-        group: df[df["LABOR_ONSET_GROUP_FINAL"].astype("string").eq(group)] for group in GROUP_ORDER
+        group: df[df["LABOR_ONSET_GROUP"].astype("string").eq(group)] for group in GROUP_ORDER
     }
 
     for var_type, section, label, col in TABLE_VARIABLES:
@@ -202,8 +228,8 @@ def build_metadata(df: pd.DataFrame, table: pd.DataFrame) -> pd.DataFrame:
             {"Item": "Source file", "Value": str(DATA_FILE.relative_to(PROJECT_ROOT))},
             {"Item": "Study context", "Value": "strict_covid_policy_period"},
             {"Item": "Total n", "Value": len(df)},
-            {"Item": GROUP_LABELS[GROUP_ORDER[0]], "Value": int(df["LABOR_ONSET_GROUP_FINAL"].astype("string").eq(GROUP_ORDER[0]).sum())},
-            {"Item": GROUP_LABELS[GROUP_ORDER[1]], "Value": int(df["LABOR_ONSET_GROUP_FINAL"].astype("string").eq(GROUP_ORDER[1]).sum())},
+            {"Item": GROUP_LABELS[GROUP_ORDER[0]], "Value": int(df["LABOR_ONSET_GROUP"].astype("string").eq(GROUP_ORDER[0]).sum())},
+            {"Item": GROUP_LABELS[GROUP_ORDER[1]], "Value": int(df["LABOR_ONSET_GROUP"].astype("string").eq(GROUP_ORDER[1]).sum())},
             {"Item": "Any missing data in retained variables", "Value": any(item["Missing n"] > 0 for item in missing_rows)},
             {"Item": "Characteristics with p < 0.05", "Value": ", ".join(significant) if significant else "None"},
         ]
@@ -253,12 +279,43 @@ def write_excel(table: pd.DataFrame, metadata: pd.DataFrame) -> None:
 def main() -> None:
     ensure_dirs()
     df = make_table_dataset(read_v03())
+    validate_cohort(df)
     table = build_table1(df)
     metadata = build_metadata(df, table)
     write_excel(table, metadata)
 
+    n_total = len(df)
+    group_counts = {
+        GROUP_LABELS[g]: int(df["LABOR_ONSET_GROUP"].astype("string").eq(g).sum())
+        for g in GROUP_ORDER
+    }
+    n_flagged = (
+        int(df["FLAG_LABOR_ONSET_REQUIRES_REVIEW"].eq(1).sum())
+        if "FLAG_LABOR_ONSET_REQUIRES_REVIEW" in df.columns
+        else "n/a"
+    )
+
     print(f"wrote: {OUTPUT_FILE.relative_to(PROJECT_ROOT)}")
-    print(f"rows: {len(table)}")
+    print(f"\n=== Cohort validation ===")
+    print(f"N total                              : {n_total}")
+    for label, count in group_counts.items():
+        print(f"  {label}: {count}")
+    print(f"FLAG_LABOR_ONSET_REQUIRES_REVIEW==1  : {n_flagged} (retained)")
+    print(f"\n=== Categorical variable validation ===")
+    all_pass = True
+    for _, label, col in CATEGORICAL_VARIABLES:
+        n_notna = int(df[col].notna().sum())
+        n_miss = n_total - n_notna
+        group_sum = sum(
+            int(df.loc[df["LABOR_ONSET_GROUP"].astype("string").eq(g), col].notna().sum())
+            for g in GROUP_ORDER
+        )
+        status = "OK" if group_sum == n_notna else "FAIL"
+        if status == "FAIL":
+            all_pass = False
+        print(f"  [{status}] {label}: non-missing={n_notna}, group_sum={group_sum}, missing={n_miss}")
+    if all_pass:
+        print("All categorical variables account for the full analytic cohort.")
 
 
 if __name__ == "__main__":
